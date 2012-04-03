@@ -116,7 +116,7 @@
  ;; def
 
 ;;;; Influenced by SBCL's parse-defmethod
-(defun parse-def (args &optional without-class)
+(defun parse-def (method args &optional without-class)
   (let* ((class (if without-class nil (pop args)))
          (options '((:export . nil)
                     (:type . :common)))
@@ -126,6 +126,8 @@
     (setf lambda-list (pop args))
     (loop while (keywordp (car args))
           do (push (cons (pop args) (pop args)) options))
+    (when (and (listp method) (eq (car method) 'setf))
+      (push '(:type . :setf) options))
     (values class (nreverse qualifiers) lambda-list options args)))
 
 (defun make-method-args (arglist &key (rest-p t))
@@ -204,26 +206,63 @@
             `(export ',method (symbol-package ',method))
             `(unexport ',method (symbol-package ',method))))))
 
+(defun %defsetf (method qualifiers self lambda-list options body)
+  (let* ((method (if (eq (symbol-package (cadr method))
+                         (find-package 'cm-methods))
+                     (dotted (cadr method))
+                     (cadr method)))
+         (value-arg (make-method-args (list (pop lambda-list)) :rest-p nil))
+         (spec-method (method-encode method lambda-list))
+         (dotted-p (dotted-p method))
+         (export-p (cdr (assoc :export options)))
+         (self-arg (car (make-method-args (list self) :rest-p nil))))
+    (when dotted-p (unintern method))
+    (multiple-value-bind (spec-args rest-arg)
+        (make-method-args lambda-list)
+      `(progn
+         ,(when self
+            `(eval-when (:compile-toplevel :load-toplevel :execute)
+               ,(unless (fboundp spec-method)
+                  (%define-common-generic `(setf ,spec-method) (append (list value-arg self) spec-args)))
+               (defmethod (setf ,spec-method) ,@qualifiers (,value-arg ,self-arg ,@spec-args)
+                 ,@(if rest-arg
+                       (list `(declare (ignore ,rest-arg))))
+                 ,@body)
+               ,(if (or export-p dotted-p)
+                    `(export ',spec-method (symbol-package ',spec-method))
+                    `(unexport ',spec-method (symbol-package ',spec-method)))))
+         (defsetf ,method (object &rest method-args) (v)
+           (let ((spec-method (method-encode ',method (extract-names method-args))))
+             (multiple-value-bind (spec-args rest-args) (make-args method-args)
+               (etypecase rest-args
+                 (list `(setf (,spec-method ,object ,@spec-args ,@rest-args) ,v))
+                 (null `(setf (,spec-method ,object ,@spec-args) ,v))))))
+         ,(if dotted-p
+              `(progn
+                 (make-common-method ,(intern (string method) 'cm-dot-methods) t)
+                 (make-common-method ,(undotted (string method) 'cm-methods) t))
+              `(make-common-method ,method ,export-p))))))
+
+(defun def-case (method qualifiers self lambda-list options body)
+  (let ((type (cdr (assoc :type options))))
+    (case type
+      (:common (%def method qualifiers self lambda-list options body))
+      (:setf (%defsetf method qualifiers self lambda-list options body))
+      (:method (%defmethod method qualifiers self lambda-list options body))
+      (t (error "Invalid type for DEF: ~A" type)))))
+
 (defmacro def (method &rest args)
   (multiple-value-bind (class qualifiers lambda-list options body)
-      (parse-def args)
-    (let ((self (if class (list (intern "SELF") class) nil))
-          (type (cdr (assoc :type options))))
-      (case type
-        (:common (%def method qualifiers self lambda-list options body))
-        (:method (%defmethod method qualifiers self lambda-list options body))
-        (t (error "Invalid type for DEF: ~A" type))))))
+      (parse-def method args)
+    (let ((self (if class (list (intern "SELF") class) nil)))
+      (def-case method qualifiers self lambda-list options body))))
 
 (defmacro def* (method &rest args)
   (multiple-value-bind (class qualifiers lambda-list options body)
-      (parse-def args t)
+      (parse-def method args t)
     (declare (ignore class))
-    (let ((self (pop lambda-list))
-          (type (cdr (assoc :type options))))
-      (case type
-        (:common (%def method qualifiers self lambda-list options body))
-        (:method (%defmethod method qualifiers self lambda-list options body))
-        (t (error "Invalid type for DEF*: ~A" type))))))
+    (let ((self (pop lambda-list)))
+      (def-case method qualifiers self lambda-list options body))))
 
  ;; definit
 
@@ -242,13 +281,13 @@
 
 (defmacro definit (&rest args)
   (multiple-value-bind (class qualifiers lambda-list options body)
-      (parse-def args)
+      (parse-def 'initialize-instance args)
     (declare (ignore options))
     (%definit qualifiers lambda-list body (list (intern "SELF") class))))
 
 (defmacro definit* (&rest args)
   (multiple-value-bind (class qualifiers lambda-list options body)
-      (parse-def args t)
+      (parse-def 'initialize-instance args t)
     (declare (ignore class options))
     (%definit qualifiers lambda-list body)))
 

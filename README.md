@@ -227,7 +227,32 @@ define methods that are not Common Methods, if you don't want to see
    ...)
 ```
 
-This may be expanded in the future to allow `def` to define other forms.
+This may be expanded in the future to allow `def` to define other
+forms.
+
+## SETF
+
+You can use `def` and `def*` for `setf` methods.  For example:
+
+```
+(def* (setf pixel) ((image image-type) value x y)
+  (format t "setting (~A,~A) to ~A" x y value))
+
+(def* (setf pixel) ((image image-type) value (:at point))
+  (format t "setting ~A to ~A" point value))
+
+(setf (pixel *some-image* :x 0 :y 1) 42)
+;; => setting (0,1) to 42
+
+(setf (pixel *some-image* :at '(4 5)) 42)
+;; => setting (4 5) to 42
+```
+
+In this case, the `COMMON-METHOD-LAMBDA-LIST` must start with a
+*first-specializing-parameter*, and the second must be the
+*value-specializing-parameter*; other parameters may follow.  Note
+that as per `def*`, if both `name` and `variable-name` are given,
+`name` is effectively discarded.
 
 ## Protocols and cm-methods
 
@@ -359,6 +384,15 @@ special, and automatically put them into `CM-METHODS`:
    (+ x y))
 
 (.x 1 :y 1) ;; => 2
+```
+
+This works equally with `SETF` methods:
+
+```
+(def* (setf .pixel) ((image image-type) value x y)
+   ...)
+
+(setf (.pixel *im* :x 1 :y 1) pixel-value)
 ```
 
 That is pretty much all there is to dot methods.  They are an optional
