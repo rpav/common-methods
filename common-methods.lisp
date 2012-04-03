@@ -211,7 +211,7 @@
                          (find-package 'cm-methods))
                      (dotted (cadr method))
                      (cadr method)))
-         (value-arg (make-method-args (list (pop lambda-list)) :rest-p nil))
+         (value-arg (car (make-method-args (list (pop lambda-list)) :rest-p nil)))
          (spec-method (method-encode method lambda-list))
          (dotted-p (dotted-p method))
          (export-p (cdr (assoc :export options)))
