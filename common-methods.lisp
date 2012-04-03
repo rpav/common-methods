@@ -131,20 +131,24 @@
     (values class (nreverse qualifiers) lambda-list options args)))
 
 (defun make-method-args (arglist &key (rest-p t))
-  (let* ((args (mapcar #'(lambda (arg)
-                           (if (and (listp arg)
-                                    (keywordp (car arg)))
-                               (if (cddr arg) (cdr arg) (cadr arg))
-                               arg))
-                       arglist))
-         (rest-decl-pos (position '&rest arglist))
+  (let* ((rest-decl-pos (position '&rest arglist))
          (rest-sym (if (not rest-decl-pos)
-                       (gensym "NO-REST-"))))
+                       (gensym "NO-REST-")))
+         (args
+           (mapcar #'(lambda (arg)
+                       (if (and (listp arg)
+                                (keywordp (car arg)))
+                           (if (cddr arg) (cdr arg) (cadr arg))
+                           arg))
+                   (sort (subseq arglist 0 rest-decl-pos)
+                         (lambda (a b)
+                           (string< (if (listp a) (car a) a)
+                                    (if (listp b) (car b) b)))))))
     (values
      (if rest-p
          (if rest-sym
              (append args (list '&rest rest-sym))
-             args)
+             (append args (subseq arglist rest-decl-pos)))
          args)
      rest-sym)))
 
@@ -222,8 +226,14 @@
       `(progn
          ,(when self
             `(eval-when (:compile-toplevel :load-toplevel :execute)
-               ,(unless (fboundp spec-method)
+               ,(unless (fboundp `(setf ,spec-method))
                   (%define-common-generic `(setf ,spec-method) (append (list value-arg self) spec-args)))
+               (defsetf ,method (object &rest method-args) (v)
+                 (let ((spec-method (method-encode ',method (extract-names method-args))))
+                   (multiple-value-bind (spec-args rest-args) (make-args method-args)
+                     (etypecase rest-args
+                       (list `(setf (,spec-method ,object ,@spec-args ,@rest-args) ,v))
+                       (null `(setf (,spec-method ,object ,@spec-args) ,v))))))
                (defmethod (setf ,spec-method) ,@qualifiers (,value-arg ,self-arg ,@spec-args)
                  ,@(if rest-arg
                        (list `(declare (ignore ,rest-arg))))
@@ -231,12 +241,6 @@
                ,(if (or export-p dotted-p)
                     `(export ',spec-method (symbol-package ',spec-method))
                     `(unexport ',spec-method (symbol-package ',spec-method)))))
-         (defsetf ,method (object &rest method-args) (v)
-           (let ((spec-method (method-encode ',method (extract-names method-args))))
-             (multiple-value-bind (spec-args rest-args) (make-args method-args)
-               (etypecase rest-args
-                 (list `(setf (,spec-method ,object ,@spec-args ,@rest-args) ,v))
-                 (null `(setf (,spec-method ,object ,@spec-args) ,v))))))
          ,(if dotted-p
               `(progn
                  (make-common-method ,(intern (string method) 'cm-dot-methods) t)
