@@ -247,12 +247,29 @@
                  (make-common-method ,(undotted (string method) 'cm-methods) t))
               `(make-common-method ,method ,export-p))))))
 
+(defun %defgeneric (method qualifiers self lambda-list options body)
+  (if qualifiers
+   (error "Qualifiers not allowed for GENERIC definition"))
+  (let* ((spec-method (method-encode method lambda-list))
+         (spec-args (make-method-args lambda-list))
+         (dotted-p (dotted-p method))
+         (export-p (cdr (assoc :export options))))
+    (when dotted-p (unintern method))
+    `(progn
+       ,(if dotted-p
+            `(progn
+               (make-common-method ,(intern (string method) 'cm-dot-methods) t)
+               (make-common-method ,(undotted (string method) 'cm-methods)) t)
+            `(make-common-method ,method ,export-p))
+       ,(%define-common-generic spec-method (append (list self) spec-args) body))))
+
 (defun def-case (method qualifiers self lambda-list options body)
   (let ((type (cdr (assoc :type options))))
     (case type
       (:common (%def method qualifiers self lambda-list options body))
       (:setf (%defsetf method qualifiers self lambda-list options body))
       (:method (%defmethod method qualifiers self lambda-list options body))
+      (:generic (%defgeneric method qualifiers self lambda-list options body))
       (t (error "Invalid type for DEF: ~A" type)))))
 
 (defmacro def (method &rest args)
@@ -307,8 +324,8 @@
     `(progn
        ,(if dotted-p
             `(progn
-               (make-common-method ,(intern (string method) 'cm-dot-methods))
-               (make-common-method ,(undotted (string method) 'cm-methods)))
+               (make-common-method ,(intern (string method) 'cm-dot-methods) t)
+               (make-common-method ,(undotted (string method) 'cm-methods)) t)
             `(make-common-method ,method nil))
        ,(%define-common-generic spec-method (append (list self) spec-args) options))))
 
