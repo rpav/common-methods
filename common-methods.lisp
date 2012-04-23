@@ -11,6 +11,13 @@
       *package*
       (symbol-package symbol)))
 
+(defun maybe-export (export symbol)
+  (cond
+    ((eq :keep export))
+    ((eq t export) `(export ',symbol (symbol-package ',symbol)))
+    ((null export) `(unexport ',symbol (symbol-package ',symbol)))
+    (t (error ":export must be one of t, nil, or :keep"))))
+
  ;; defclass*
 
 (defun parse-slot (slot)
@@ -92,7 +99,7 @@
           end
           finally (return (sort-args named-args)))))
 
-(defmacro make-common-method (method &optional export-p)
+(defmacro make-common-method (method &optional export)
   (let ((defs (unless (fboundp method)
                 `((declaim (inline ,method))
                   (defun ,method (object &rest method-args)
@@ -108,17 +115,14 @@
                           (null `(,spec-method ,object ,@spec-args))))))))))
     `(eval-when (:compile-toplevel :load-toplevel :execute)
        ,@defs
-       (if ,export-p
-           (export ',method (symbol-package ',method))
-           (unexport ',method (symbol-package ',method))))))
-
+       ,(maybe-export export method))))
 
  ;; def
 
 ;;;; Influenced by SBCL's parse-defmethod
 (defun parse-def (method args &optional without-class)
   (let* ((class (if without-class nil (pop args)))
-         (options '((:export . nil)
+         (options '((:export . :keep)
                     (:type . :common)))
          qualifiers lambda-list)
     (loop until (listp (car args))
@@ -178,7 +182,7 @@
                      method))
          (spec-method (method-encode method lambda-list))
          (dotted-p (dotted-p method))
-         (export-p (cdr (assoc :export options)))
+         (export (cdr (assoc :export options)))
          (self-arg (car (make-method-args (list self) :rest-p nil))))
     (when dotted-p (unintern method))
     (multiple-value-bind (spec-args rest-arg)
@@ -192,23 +196,19 @@
                  ,@(if rest-arg
                        (list `(declare (ignore ,rest-arg))))
                  ,@body)
-               ,(if (or export-p dotted-p)
-                    `(export ',spec-method (symbol-package ',spec-method))
-                    `(unexport ',spec-method (symbol-package ',spec-method)))))
+               ,(maybe-export (or dotted-p export) spec-method)))
          ,(if dotted-p
               `(progn
                  (make-common-method ,(intern (string method) 'cm-dot-methods) t)
                  (make-common-method ,(undotted (string method) 'cm-methods) t))
-              `(make-common-method ,method ,export-p))))))
+              `(make-common-method ,method ,export))))))
 
 (defun %defmethod (method qualifiers self lambda-list options body)
-  (let* ((export-p (cdr (assoc :export options))))
+  (let* ((export (cdr (assoc :export options))))
     `(eval-when (:compile-toplevel :load-toplevel :execute)
        (defmethod ,method ,@qualifiers (,self ,@lambda-list)
          ,@body)
-       ,(if export-p
-            `(export ',method (symbol-package ',method))
-            `(unexport ',method (symbol-package ',method))))))
+       ,(maybe-export export method))))
 
 (defun %defsetf (method qualifiers self lambda-list options body)
   (let* ((method (if (eq (symbol-package (cadr method))
@@ -218,7 +218,7 @@
          (value-arg (car (make-method-args (list (pop lambda-list)) :rest-p nil)))
          (spec-method (method-encode method lambda-list))
          (dotted-p (dotted-p method))
-         (export-p (cdr (assoc :export options)))
+         (export (cdr (assoc :export options)))
          (self-arg (car (make-method-args (list self) :rest-p nil))))
     (when dotted-p (unintern method))
     (multiple-value-bind (spec-args rest-arg)
@@ -238,14 +238,12 @@
                  ,@(if rest-arg
                        (list `(declare (ignore ,rest-arg))))
                  ,@body)
-               ,(if (or export-p dotted-p)
-                    `(export ',spec-method (symbol-package ',spec-method))
-                    `(unexport ',spec-method (symbol-package ',spec-method)))))
+               ,(maybe-export export spec-method)))
          ,(if dotted-p
               `(progn
                  (make-common-method ,(intern (string method) 'cm-dot-methods) t)
                  (make-common-method ,(undotted (string method) 'cm-methods) t))
-              `(make-common-method ,method ,export-p))))))
+              `(make-common-method ,method ,export))))))
 
 (defun %defgeneric (method qualifiers self lambda-list options body)
   (if qualifiers
@@ -253,14 +251,14 @@
   (let* ((spec-method (method-encode method lambda-list))
          (spec-args (make-method-args lambda-list))
          (dotted-p (dotted-p method))
-         (export-p (cdr (assoc :export options))))
+         (export (cdr (assoc :export options))))
     (when dotted-p (unintern method))
     `(progn
        ,(if dotted-p
             `(progn
                (make-common-method ,(intern (string method) 'cm-dot-methods) t)
                (make-common-method ,(undotted (string method) 'cm-methods)) t)
-            `(make-common-method ,method ,export-p))
+            `(make-common-method ,method ,export))
        ,(%define-common-generic spec-method (append (list self) spec-args) body))))
 
 (defun def-case (method qualifiers self lambda-list options body)
