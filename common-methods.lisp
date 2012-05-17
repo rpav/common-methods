@@ -188,6 +188,11 @@
     (multiple-value-bind (spec-args rest-arg)
         (make-method-args lambda-list)
       `(progn
+         ,(if dotted-p
+              `(progn
+                 (make-common-method ,(intern (string method) 'cm-dot-methods) t)
+                 (make-common-method ,(undotted (string method) 'cm-methods) t))
+              `(make-common-method ,method ,export))
          ,(when self
             `(eval-when (:compile-toplevel :load-toplevel :execute)
                ,(unless (fboundp spec-method)
@@ -196,12 +201,7 @@
                  ,@(if rest-arg
                        (list `(declare (ignore ,rest-arg))))
                  ,@body)
-               ,(maybe-export (or dotted-p export) spec-method)))
-         ,(if dotted-p
-              `(progn
-                 (make-common-method ,(intern (string method) 'cm-dot-methods) t)
-                 (make-common-method ,(undotted (string method) 'cm-methods) t))
-              `(make-common-method ,method ,export))))))
+               ,(maybe-export (or dotted-p export) spec-method)))))))
 
 (defun %defmethod (method qualifiers self lambda-list options body)
   (let* ((export (cdr (assoc :export options))))
@@ -223,10 +223,13 @@
     (when dotted-p (unintern method))
     (multiple-value-bind (spec-args rest-arg)
         (make-method-args lambda-list)
-      `(progn
-         ,(when self
-            `(eval-when (:compile-toplevel :load-toplevel :execute)
-               ,(unless (fboundp `(setf ,spec-method))
+      `(eval-when (:compile-toplevel :load-toplevel :execute)
+         ,@(if dotted-p
+               `((make-common-method ,(intern (string method) 'cm-dot-methods) t)
+                 (make-common-method ,(undotted (string method) 'cm-methods) t))
+               `((make-common-method ,method ,export)))
+         ,@(when self
+             `(,(unless (fboundp `(setf ,spec-method))
                   (%define-common-generic `(setf ,spec-method) (append (list value-arg self) spec-args)))
                (defsetf ,method (object &rest method-args) (v)
                  (let ((spec-method (method-encode ',method (extract-names method-args))))
@@ -238,12 +241,7 @@
                  ,@(if rest-arg
                        (list `(declare (ignore ,rest-arg))))
                  ,@body)
-               ,(maybe-export export spec-method)))
-         ,(if dotted-p
-              `(progn
-                 (make-common-method ,(intern (string method) 'cm-dot-methods) t)
-                 (make-common-method ,(undotted (string method) 'cm-methods) t))
-              `(make-common-method ,method ,export))))))
+               ,(maybe-export export spec-method)))))))
 
 (defun %defgeneric (method qualifiers self lambda-list options body)
   (if qualifiers
@@ -334,4 +332,7 @@
   `(make-instance ',class ,@args))
 
 (defmacro -> (args &body body)
-  `(lambda ,args ,@body))
+  (if (listp args)
+      `(lambda ,args ,@body)
+      `(lambda (,args) ,@body)))
+
