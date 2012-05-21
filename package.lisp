@@ -1,5 +1,5 @@
 (defpackage #:common-methods
-  (:use #:closer-common-lisp #:asdf #:alexandria #:named-readtables)
+  (:use #:closer-common-lisp #:alexandria #:named-readtables)
   (:export #:defclass* #:define-common-generic #:new
            #:def #:def* #:definit #:definit* #:->
            #:cm-accessors)
