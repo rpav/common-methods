@@ -50,7 +50,8 @@
     `(progn
        (eval-when (:compile-toplevel :load-toplevel :execute)
          ,(if export
-              `(export ',(ensure-symbol class-name)))
+              (let ((symbol (ensure-symbol class-name (symbol-package class-name))))
+                `(export ',symbol ,(symbol-package symbol))))
          ,class-defn))))
 
  ;; make-common-method
@@ -99,10 +100,14 @@
           end
           finally (return (sort-args named-args)))))
 
+(defvar *slow-notifications* nil)
+
 (defmacro make-common-method (method &optional export)
   (let ((defs (unless (fboundp method)
                 `((declaim (inline ,method))
                   (defun ,method (object &rest method-args)
+                    (when *slow-notifications*
+                      (warn "Slow method calling used for ~A" ',method))
                     (let ((spec-method (method-encode ',method (extract-names method-args))))
                       (multiple-value-bind (spec-args rest-args) (make-args method-args)
                         (apply spec-method object (nconc spec-args rest-args)))))
@@ -169,7 +174,9 @@
   (intern (subseq (string method) 1) package))
 
 (defun dotted (method)
-  (intern (concatenate 'string "." (string method)) 'cm-dot-methods))
+  (if (dotted-p method)
+      (intern (string method) 'cm-dot-methods)
+      (intern (concatenate 'string "." (string method)) 'cm-dot-methods)))
 
 (defun %define-common-generic (spec-method spec-args &optional options)
   (let* ((gen-args (make-generic-args spec-args)))
@@ -231,7 +238,10 @@
          ,@(when self
              `(,(unless (fboundp `(setf ,spec-method))
                   (%define-common-generic `(setf ,spec-method) (append (list value-arg self) spec-args)))
-               (defsetf ,method (object &rest method-args) (v)
+               (defsetf ,(if dotted-p
+                             (intern (string method) 'cm-dot-methods)
+                             method)
+                   (object &rest method-args) (v)
                  (let ((spec-method (method-encode ',method (extract-names method-args))))
                    (multiple-value-bind (spec-args rest-args) (make-args method-args)
                      (etypecase rest-args
