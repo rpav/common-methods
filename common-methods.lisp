@@ -115,9 +115,9 @@
                     (let ((spec-method (method-encode ',method (extract-names method-args))))
                       (multiple-value-bind (spec-args rest-args) (make-args method-args)
                         (etypecase rest-args
+                          (null `(,spec-method ,object ,@spec-args))
                           (list `(,spec-method ,object ,@spec-args ,@rest-args))
-                          (symbol `(apply #',spec-method ,object ,@spec-args ,rest-args))
-                          (null `(,spec-method ,object ,@spec-args))))))))))
+                          (symbol `(apply #',spec-method ,object ,@spec-args ,rest-args))))))))))
     `(eval-when (:compile-toplevel :load-toplevel :execute)
        ,@defs
        ,(maybe-export export method))))
@@ -245,8 +245,8 @@
                  (let ((spec-method (method-encode ',method (extract-names method-args))))
                    (multiple-value-bind (spec-args rest-args) (make-args method-args)
                      (etypecase rest-args
-                       (list `(setf (,spec-method ,object ,@spec-args ,@rest-args) ,v))
-                       (null `(setf (,spec-method ,object ,@spec-args) ,v))))))
+                       (null `(setf (,spec-method ,object ,@spec-args) ,v))
+                       (list `(setf (,spec-method ,object ,@spec-args ,@rest-args) ,v))))))
                (defmethod (setf ,spec-method) ,@qualifiers (,value-arg ,self-arg ,@spec-args)
                  ,@(if rest-arg
                        (list `(declare (ignore ,rest-arg))))
